@@ -2,6 +2,12 @@
 
 A portable Windows desktop app for checking video formats and downloading selected qualities with [yt-dlp](https://github.com/yt-dlp/yt-dlp). The interface follows the Windows display language when Portuguese is selected; English is used for other system languages. The product name remains **Easy Video Downloader**.
 
+<p align="center">
+  <a href="https://github.com/fiassink/easy-video-download/releases/download/1.0.0/EasyVideoDownloader-portable.zip">
+    <img src="https://img.shields.io/badge/Download-Version%201.0.0-2ea44f?style=for-the-badge&logo=github" alt="Download Easy Video Downloader 1.0.0">
+  </a>
+</p>
+
 ## Features
 
 - Lists formats reported for the supplied URL, including resolution and orientation.
