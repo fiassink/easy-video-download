@@ -1,0 +1,9 @@
+tools/*.exe
+tools/*.zip
+tools/.ffmpeg-extract/
+VideoDownloader.exe
+EasyVideoDownloader.exe
+VideoDownloader-portable.zip
+EasyVideoDownloader-portable.zip
+source/bin/
+source/obj/
