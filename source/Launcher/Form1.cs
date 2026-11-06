@@ -433,6 +433,7 @@ public sealed class Form1 : Form
 	{
 		SetStatus(UiText.Get("Tentando localizar a mídia no player em uma janela invisível…", "Looking for media in the player…"));
 		HashSet<string> candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> primaryCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		Dictionary<string, string> cookiesByMediaUrl = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		string capturedTitle = "";
 		string capturedThumbnail = "";
@@ -482,7 +483,7 @@ public sealed class Form1 : Form
 				await Task.Delay(1000, cancellationToken);
 				try
 				{
-					string javaScript = "(() => { const out=new Set(); for(const v of document.querySelectorAll('video')) { if(v.currentSrc && /^https?:/i.test(v.currentSrc)) out.add(v.currentSrc); if(v.src && /^https?:/i.test(v.src)) out.add(v.src); } for(const e of performance.getEntriesByType('resource')) if(/\\.(mp4|m3u8|mpd)(?:$|[?#])/i.test(e.name)) out.add(e.name); const rawImage=document.querySelector('meta[property=\"og:image:secure_url\"]')?.content||document.querySelector('meta[property=\"og:image\"]')?.content||document.querySelector('meta[name=\"twitter:image\"]')?.content||document.querySelector('video')?.poster||''; let image=''; try { image=rawImage?new URL(rawImage,location.href).href:''; } catch {} for(const v of document.querySelectorAll('video')) { v.muted=true; if(v.paused) v.play().catch(()=>{}); } return JSON.stringify({mediaUrls:[...out],title:document.title,thumbnail:image}); })()";
+					string javaScript = "(() => { const isHttp=u=>/^https?:/i.test(u||''); const isMedia=u=>/\\.(mp4|m4v|webm|mov|m3u8|mpd)(?:$|[?#])/i.test(u||''); const videos=[...document.querySelectorAll('video')]; const visible=v=>{const r=v.getBoundingClientRect(),s=getComputedStyle(v); return r.width>80&&r.height>60&&s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0;}; const score=v=>{const r=v.getBoundingClientRect(); let n=visible(v)?r.width*r.height:0; const hint=((v.id||'')+' '+(v.className||'')+' '+(v.parentElement?.id||'')+' '+(v.parentElement?.className||'')).toLowerCase(); if(/main|primary|player|video-container|video-player|post-content/.test(hint)) n*=2; if(v.controls||v.hasAttribute('controls')) n*=1.2; return n;}; const primary=videos.filter(visible).sort((a,b)=>score(b)-score(a))[0]||videos.find(v=>v.currentSrc||v.src); const main=new Set(); const add=(set,u)=>{try{if(isHttp(u)){const x=new URL(u,location.href).href;if(isMedia(x))set.add(x);}}catch{}}; const metaVideo=document.querySelector('meta[property=\"og:video:secure_url\"]')?.content||document.querySelector('meta[property=\"og:video:url\"]')?.content||document.querySelector('meta[property=\"og:video\"]')?.content||''; add(main,metaVideo); if(primary){add(main,primary.currentSrc);add(main,primary.src);for(const s of primary.querySelectorAll('source'))add(main,s.src); if(primary.paused){primary.muted=true;primary.play().catch(()=>{});}} const other=new Set(); for(const v of videos){if(v!==primary){add(other,v.currentSrc);add(other,v.src);for(const s of v.querySelectorAll('source'))add(other,s.src);}} for(const e of performance.getEntriesByType('resource'))if(isMedia(e.name))add(other,e.name); const imageNode=primary?.poster||document.querySelector('meta[property=\"og:image:secure_url\"]')?.content||document.querySelector('meta[property=\"og:image\"]')?.content||document.querySelector('meta[name=\"twitter:image\"]')?.content||''; let image='';try{image=imageNode?new URL(imageNode,location.href).href:'';}catch{} return JSON.stringify({primaryMediaUrls:[...main],mediaUrls:[...other],title:document.title,thumbnail:image}); })()";
 					string? text = JsonSerializer.Deserialize<string>(await web.CoreWebView2.ExecuteScriptAsync(javaScript));
 					if (!string.IsNullOrWhiteSpace(text))
 					{
@@ -496,7 +497,17 @@ public sealed class Form1 : Form
 						{
 							capturedThumbnail = GetString(snapshot, "thumbnail");
 						}
-					if (snapshot.TryGetProperty("mediaUrls", out JsonElement mediaUrls) && mediaUrls.ValueKind == JsonValueKind.Array)
+						if (snapshot.TryGetProperty("primaryMediaUrls", out JsonElement primaryMediaUrls) && primaryMediaUrls.ValueKind == JsonValueKind.Array)
+						{
+							foreach (JsonElement item in primaryMediaUrls.EnumerateArray())
+							{
+								if (item.ValueKind == JsonValueKind.String && item.GetString() is string media && LooksLikeMedia(media))
+								{
+									primaryCandidates.Add(media);
+								}
+							}
+						}
+						if (snapshot.TryGetProperty("mediaUrls", out JsonElement mediaUrls) && mediaUrls.ValueKind == JsonValueKind.Array)
 						{
 							foreach (JsonElement item in mediaUrls.EnumerateArray())
 							{
@@ -511,12 +522,12 @@ public sealed class Form1 : Form
 				catch
 				{
 				}
-				if (candidates.Count > 0 && attempt >= 8)
+				if (primaryCandidates.Count + candidates.Count > 0 && attempt >= 8)
 				{
 					break;
 				}
 			}
-			foreach (string mediaUrl in candidates.Take(12))
+			foreach (string mediaUrl in primaryCandidates.Concat(candidates).Distinct(StringComparer.OrdinalIgnoreCase).Take(12))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				try
@@ -542,12 +553,15 @@ public sealed class Form1 : Form
 			SetVideoPreview(string.IsNullOrWhiteSpace(capturedTitle) ? UiText.Get("Vídeo encontrado no player", "Video found in player") : capturedTitle,
 				UiText.Get("Informações obtidas pela página do vídeo.", "Information found on the video page."), capturedThumbnail);
 		}
-		if (candidates.Count == 0)
+		if (primaryCandidates.Count + candidates.Count == 0)
 		{
 			throw new InvalidOperationException(UiText.Get("O player não expôs uma URL de mídia acessível. Se o vídeo usar DRM ou stream protegido, não é possível baixá-lo por este método.", "The player did not expose an accessible media URL. DRM or protected streams cannot be downloaded this way."));
 		}
 		List<VideoFormat> found = new List<VideoFormat>();
-		foreach (string mediaUrl in candidates.OrderBy((string u) => (!u.Contains(".m3u8", StringComparison.OrdinalIgnoreCase)) ? 1 : 0))
+		foreach (string mediaUrl in primaryCandidates.Concat(candidates)
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.OrderBy(u => primaryCandidates.Contains(u) ? 0 : 1)
+			.ThenBy(u => (!u.Contains(".m3u8", StringComparison.OrdinalIgnoreCase)) ? 1 : 0))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			string mediaCookieHeader = cookiesByMediaUrl.GetValueOrDefault(mediaUrl, "");
